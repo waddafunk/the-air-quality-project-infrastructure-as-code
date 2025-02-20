@@ -19,6 +19,12 @@ resource "azurerm_subnet" "aks" {
   resource_group_name  = azurerm_resource_group.rg.name
   virtual_network_name = azurerm_virtual_network.vnet.name
   address_prefixes     = var.aks_subnet_address_prefix
+
+  # Enable private endpoint network policies
+  private_endpoint_network_policies = "Enabled" 
+
+  # Service endpoints for PostgreSQL
+  service_endpoints = ["Microsoft.Storage", "Microsoft.Sql"]
 }
 
 # AKS Cluster

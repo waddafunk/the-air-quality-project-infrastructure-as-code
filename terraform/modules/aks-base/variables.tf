@@ -68,3 +68,8 @@ variable "dns_service_ip" {
   description = "IP address for Kubernetes DNS service"
   type        = string
 }
+
+variable "environment" {
+  description = "Environment name"
+  type        = string
+}
