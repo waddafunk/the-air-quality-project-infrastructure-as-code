@@ -9,14 +9,14 @@ This repository contains the Infrastructure as Code (IaC) implementation for the
 ```mermaid
 graph TB
     subgraph "Azure Subscription"
-        subgraph "Resource Group: air-quality-kube-dev"
-            AKS["AKS Cluster<br/>air-quality-kube-aks"]
+        subgraph "Resource Group: kube"
+            AKS["AKS Cluster<br/>kube-aks"]
             subgraph "Virtual Network"
                 SUBNET["AKS Subnet"]
             end
         end
         
-        subgraph "Resource Group: air-quality-data-dev"
+        subgraph "Resource Group: data"
             DL["Data Lake<br/>Gen2 Storage"]
             subgraph "Data Lake Containers"
                 RAW["raw"]
@@ -25,7 +25,7 @@ graph TB
             end
         end
         
-        subgraph "Resource Group: terraform-state-dev"
+        subgraph "Resource Group: tf-state"
             TFSTATE["Terraform State<br/>Storage Account"]
         end
     end
