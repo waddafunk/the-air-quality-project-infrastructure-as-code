@@ -27,3 +27,5 @@ override.tf.json
 terraform.rc
 
 *.lock*
+
+flattened
