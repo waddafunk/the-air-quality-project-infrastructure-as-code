@@ -1,0 +1,5 @@
+webserver:
+  defaultUser:
+    username: test
+    password: lezgo
+    email: your_email@domain.com
