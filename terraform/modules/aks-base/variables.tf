@@ -34,11 +34,6 @@ variable "aks_subnet_address_prefix" {
   type        = list(string)
 }
 
-variable "node_count" {
-  description = "Initial number of nodes"
-  type        = number
-}
-
 variable "node_count_min" {
   description = "Minimum number of nodes"
   type        = number

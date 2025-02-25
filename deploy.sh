@@ -8,6 +8,10 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# Default values
+DELETE_WAREHOUSE=false
+ENVIRONMENT="dev"
+
 # Helper functions
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
@@ -32,6 +36,8 @@ check_command() {
 check_command "terraform"
 check_command "terragrunt"
 check_command "az"
+check_command "helm"
+check_command "kubectl"
 
 # Verify Azure CLI login
 az account show &> /dev/null || {
@@ -43,6 +49,151 @@ az account show &> /dev/null || {
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
+wait_for_lock(){
+    max_retries=5
+    retry_count=0
+    while [ $retry_count -lt $max_retries ]; do
+        if az storage blob show \
+            --container-name tfstate \
+            --name "terraform.tfstate.tflock" \
+            --account-name aqtfstatedev \
+            2>/dev/null; then
+            log_info "State is still locked, waiting..."
+            sleep 30
+            retry_count=$((retry_count + 1))
+        else
+            break
+        fi
+    done
+}
+
+wait_for_postgres() {
+    log_info "Waiting for PostgreSQL to be ready..."
+    RETRIES=0
+    MAX_RETRIES=30
+    until az postgres flexible-server show \
+        --name air-quality-kube-airflow-pg-${ENVIRONMENT} \
+        --resource-group air-quality-db-${ENVIRONMENT} \
+        --query 'state' -o tsv | grep -q "Ready"; do
+        if [ $RETRIES -eq $MAX_RETRIES ]; then
+            log_error "Timed out waiting for PostgreSQL"
+            exit 1
+        fi
+        RETRIES=$((RETRIES+1))
+        echo "Waiting... ($RETRIES/$MAX_RETRIES)"
+        sleep 10
+    done
+    log_info "PostgreSQL is ready!"
+}
+
+# Clean up data warehouse resources
+clean_data_warehouse() {
+    if [ "$DELETE_WAREHOUSE" = true ]; then
+        log_info "Cleaning up existing data-warehouse resources..."
+        
+        # Set up variables
+        PREFIX="air-quality-kube"
+        KV_NAME="${PREFIX}dbkv${ENVIRONMENT}"
+        KV_NAME=${KV_NAME//-/}  # Remove hyphens
+        
+        # Delete PostgreSQL server if it exists
+        log_info "Deleting PostgreSQL server if it exists..."
+        az postgres flexible-server delete \
+            --name "${PREFIX}-airflow-pg-${ENVIRONMENT}" \
+            --resource-group "air-quality-db-${ENVIRONMENT}" \
+            --yes 2>/dev/null || true
+            
+        # Delete Key Vault secrets if they exist
+        log_info "Deleting Key Vault secrets if they exist..."
+        SECRETS_TO_DELETE=("airflow-postgres-password" "airflow-admin-password" "airflow-postgres-host" "airflow-postgres-port" "airflow-postgres-db" "airflow-postgres-user" "airflow-admin-user" "airflow-admin-email")
+        
+        for secret in "${SECRETS_TO_DELETE[@]}"; do
+            if az keyvault secret show --vault-name "${KV_NAME}" --name "$secret" &>/dev/null; then
+                log_info "Deleting secret: $secret"
+                az keyvault secret delete --vault-name "${KV_NAME}" --name "$secret" || true
+                
+                # Wait for deletion to complete before purging
+                WAIT_DELETE=15
+                INTERVAL=3
+                ELAPSED=0
+                
+                while [ $ELAPSED -lt $WAIT_DELETE ]; do
+                    if az keyvault secret show-deleted --vault-name "${KV_NAME}" --name "$secret" &>/dev/null; then
+                        log_info "Secret $secret is now in deleted state, proceeding to purge"
+                        break
+                    fi
+                    
+                    log_info "Waiting for secret $secret to enter deleted state... ($ELAPSED/$WAIT_DELETE seconds)"
+                    sleep $INTERVAL
+                    ELAPSED=$((ELAPSED + INTERVAL))
+                done
+                
+                # Purge the secret
+                az keyvault secret purge --vault-name "${KV_NAME}" --name "$secret" || true
+            fi
+        done
+        
+        # Verify PostgreSQL server deletion
+        log_info "Verifying PostgreSQL server deletion..."
+        MAX_WAIT=60
+        WAIT_INTERVAL=5
+        ELAPSED=0
+        
+        while [ $ELAPSED -lt $MAX_WAIT ]; do
+            if ! az postgres flexible-server show \
+                --name "${PREFIX}-airflow-pg-${ENVIRONMENT}" \
+                --resource-group "air-quality-db-${ENVIRONMENT}" \
+                &>/dev/null; then
+                log_info "PostgreSQL server has been deleted successfully"
+                break
+            fi
+            
+            log_info "Waiting for PostgreSQL server deletion to complete... ($ELAPSED/$MAX_WAIT seconds)"
+            sleep $WAIT_INTERVAL
+            ELAPSED=$((ELAPSED + WAIT_INTERVAL))
+        done
+        
+        if [ $ELAPSED -ge $MAX_WAIT ]; then
+            log_warn "PostgreSQL server deletion verification timed out, proceeding anyway..."
+        fi
+        
+        # Verify Key Vault secrets are purged
+        log_info "Verifying Key Vault secrets purge completion..."
+        ELAPSED=0
+        SECRETS_PURGED=true
+        
+        while [ $ELAPSED -lt $MAX_WAIT ]; do
+            SECRETS_PURGED=true
+            for secret in "airflow-postgres-password" "airflow-admin-password" "airflow-postgres-host"; do
+                if az keyvault secret show --vault-name "${KV_NAME}" --name "$secret" &>/dev/null; then
+                    SECRETS_PURGED=false
+                    break
+                fi
+                
+                if az keyvault secret show-deleted --vault-name "${KV_NAME}" --name "$secret" &>/dev/null; then
+                    SECRETS_PURGED=false
+                    break
+                fi
+            done
+            
+            if [ "$SECRETS_PURGED" = true ]; then
+                log_info "Key Vault secrets have been purged successfully"
+                break
+            fi
+            
+            log_info "Waiting for Key Vault secrets purge to complete... ($ELAPSED/$MAX_WAIT seconds)"
+            sleep $WAIT_INTERVAL
+            ELAPSED=$((ELAPSED + WAIT_INTERVAL))
+        done
+        
+        if [ $ELAPSED -ge $MAX_WAIT ]; then
+            log_warn "Key Vault secrets purge verification timed out, proceeding anyway..."
+        fi
+    else
+        log_info "Skipping data-warehouse cleanup (use --delete-warehouse to enable cleanup)"
+    fi
+}
+
 # Deploy bootstrap (Terraform state storage)
 deploy_bootstrap() {
     log_info "Deploying bootstrap (Terraform state storage)..."
@@ -50,50 +201,98 @@ deploy_bootstrap() {
     terraform init
     terraform apply -auto-approve
     cd ../../..
-    sleep 20
 }
 
 # Deploy environment infrastructure
 deploy_environment() {
     local env=$1
+    ENVIRONMENT=$env  # Set global environment variable
     log_info "Deploying $env environment infrastructure..."
 
-    # Deploy AKS base first
-    log_info "Deploying AKS cluster..."
-    cd "terraform/environments/$env/aks-base"
-    terragrunt init
-    terragrunt apply -auto-approve
-
-    sleep 20
-    
-    # Deploy Data Lake
+    # Deploy Data Lake first
+    wait_for_lock
     log_info "Deploying Data Lake..."
-    cd ../data-lake
+    cd terraform/environments/$env/data-lake
     terragrunt init
     terragrunt apply -auto-approve
 
-    sleep 20
+    # Deploy AKS last - now including the role assignments
+    wait_for_lock
+    log_info "Deploying AKS cluster..."
+    cd ../aks-base
+    terragrunt init
+    terragrunt apply -auto-approve
 
-    #deploy Airflow on top of k8s
-    cd ../../../../helm/airflow
-    az aks get-credentials --resource-group air-quality-kube-dev --name air-quality-kube-aks
-    helm repo add airflow https://airflow.apache.org
-    helm upgrade --install airflow airflow/airflow -f values.yaml
-    
+    # Clean up before deploying Data Warehouse if delete flag is set
+    clean_data_warehouse
+
+    # Deploy Data Warehouse (PostgreSQL)
+    wait_for_lock
+    log_info "Deploying Data Warehouse..."
+    cd ../data-warehouse
+    terragrunt init
+    terragrunt apply -auto-approve
+
+    # Wait for PostgreSQL to be ready
+    wait_for_postgres
+
+    # Get Kubernetes credentials
+    log_info "Getting AKS credentials..."
+    az aks get-credentials \
+        --resource-group air-quality-kube-${env} \
+        --name air-quality-kube-aks \
+        --overwrite-existing
+        
     cd ../../..
 }
 
+# Print usage information
+print_usage() {
+    echo "Usage: $0 [OPTIONS]"
+    echo "Deploy infrastructure for the Air Quality project"
+    echo ""
+    echo "Options:"
+    echo "  -e, --environment ENV   Specify environment (dev or prod, default: dev)"
+    echo "  -d, --delete-warehouse            Delete existing resources before deployment"
+    echo "  -h, --help              Display this help message"
+}
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -e|--environment)
+            ENVIRONMENT="$2"
+            shift 2
+            ;;
+        -d|--delete-warehouse)
+            DELETE_WAREHOUSE=true
+            shift
+            ;;
+        -h|--help)
+            print_usage
+            exit 0
+            ;;
+        *)
+            log_error "Unknown option: $1"
+            print_usage
+            exit 1
+            ;;
+    esac
+done
+
+# Validate environment
+if [ "$ENVIRONMENT" != "dev" ] && [ "$ENVIRONMENT" != "prod" ]; then
+    log_error "Invalid environment. Please specify 'dev' or 'prod'"
+    exit 1
+fi
+
 # Main deployment function
 main() {
-    local environment=${1:-dev}  # Default to dev if no environment specified
+    log_info "Starting deployment for $ENVIRONMENT environment..."
     
-    # Validate environment
-    if [ "$environment" != "dev" ] && [ "$environment" != "prod" ]; then
-        log_error "Invalid environment. Please specify 'dev' or 'prod'"
-        exit 1
+    if [ "$DELETE_WAREHOUSE" = true ]; then
+        log_warn "Delete mode enabled: Existing resources will be deleted before deployment"
     fi
-    
-    log_info "Starting deployment for $environment environment..."
     
     # Deploy bootstrap if it hasn't been deployed yet
     if [ ! -f "terraform/bootstrap/terraform.tfstate" ]; then
@@ -103,24 +302,10 @@ main() {
     fi
     
     # Deploy environment infrastructure
-    deploy_environment $environment
+    deploy_environment $ENVIRONMENT
     
     log_info "Deployment completed successfully!"
 }
 
-# Parse command line arguments
-environment="dev"
-while getopts "e:" opt; do
-    case $opt in
-        e)
-            environment="$OPTARG"
-            ;;
-        \?)
-            log_error "Invalid option: -$OPTARG"
-            exit 1
-            ;;
-    esac
-done
-
 # Execute main function
-main $environment
+main

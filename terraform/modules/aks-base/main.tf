@@ -1,3 +1,8 @@
+data "azurerm_key_vault" "kv" {
+  name                = replace("${var.prefix}dbkv${var.environment}", "-", "")
+  resource_group_name = "air-quality-data-${var.environment}"
+}
+
 resource "azurerm_resource_group" "rg" {
   name     = var.resource_group_name
   location = var.location
@@ -35,16 +40,19 @@ resource "azurerm_kubernetes_cluster" "aks" {
   dns_prefix         = "${var.prefix}-aks"
   kubernetes_version = var.kubernetes_version
 
+  oidc_issuer_enabled = true
+
   default_node_pool {
     name           = "default"
-    node_count     = var.node_count
     vm_size        = var.node_size
     vnet_subnet_id = azurerm_subnet.aks.id
     max_pods       = 50
     os_disk_size_gb = var.os_disk_size_gb
+    temporary_name_for_rotation = "tempnodepool" 
+
+    enable_auto_scaling = true
 
     # Add autoscaling configuration
-    enable_auto_scaling = true
     min_count          = var.node_count_min
     max_count          = var.node_count_max
   }

@@ -15,7 +15,7 @@ provider "azurerm" {
 
 resource "azurerm_resource_group" "terraform_state" {
   name     = "terraform-state-dev"
-  location = "italynorth"
+  location = "westeurope"
 }
 
 resource "azurerm_storage_account" "terraform_state" {
