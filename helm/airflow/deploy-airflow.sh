@@ -41,6 +41,8 @@ log_info "Getting credentials from Azure Key Vault..."
 POSTGRES_HOST=$(az keyvault secret show --vault-name "$KV_NAME" --name "airflow-postgres-host" --query value -o tsv 2>/dev/null || echo "air-quality-kube-airflow-pg-dev.postgres.database.azure.com")
 POSTGRES_USER=$(az keyvault secret show --vault-name "$KV_NAME" --name "airflow-postgres-user" --query value -o tsv 2>/dev/null || echo "airflow_admin")
 POSTGRES_PASSWORD=$(az keyvault secret show --vault-name "$KV_NAME" --name "airflow-postgres-password" --query value -o tsv)
+FERNET_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+WEBSERVER_SECRET_KEY=$(python -c "import secrets; print(secrets.token_hex(32))")
 
 # If the secrets don't exist, create them
 if [ -z "$POSTGRES_HOST" ]; then
@@ -99,7 +101,10 @@ cp airflow-values.yaml airflow-values-with-creds.yaml
 sed -i "s|\${POSTGRES_HOST}|$POSTGRES_HOST|g" airflow-values-with-creds.yaml
 sed -i "s|\${POSTGRES_USER}|$POSTGRES_USER|g" airflow-values-with-creds.yaml
 sed -i "s|\${AIRFLOW_ADMIN_USER}|$AIRFLOW_ADMIN_USER|g" airflow-values-with-creds.yaml
+sed -i "s|\${AIRFLOW_ADMIN_PASSWORD}|$AIRFLOW_ADMIN_PASSWORD|g" airflow-values-with-creds.yaml
 sed -i "s|\${AIRFLOW_ADMIN_EMAIL}|$AIRFLOW_ADMIN_EMAIL|g" airflow-values-with-creds.yaml
+sed -i "s|\${WEBSERVER_SECRET_KEY}|$WEBSERVER_SECRET_KEY|g" airflow-values-with-creds.yaml
+sed -i "s|\${FERNET_KEY}|$FERNET_KEY|g" airflow-values-with-creds.yaml
 
 # Replace Workload Identity Client ID if available
 if [ ! -z "$AIRFLOW_MANAGED_IDENTITY_CLIENT_ID" ]; then
