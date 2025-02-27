@@ -1,5 +1,3 @@
-# Add this to your data-warehouse module or create a new airflow module
-
 # Generate Airflow admin credentials
 resource "random_password" "airflow_admin_password" {
   length  = 16
@@ -17,8 +15,10 @@ resource "azurerm_key_vault_secret" "airflow_postgres_host" {
   key_vault_id = data.azurerm_key_vault.kv.id
   
   depends_on = [
-    azurerm_role_assignment.kv_terraform
+    azurerm_role_assignment.kv_terraform,
+    azurerm_role_assignment.terraform_keyvault_admin
   ]
+  
 }
 
 resource "azurerm_key_vault_secret" "airflow_postgres_port" {
@@ -27,8 +27,16 @@ resource "azurerm_key_vault_secret" "airflow_postgres_port" {
   key_vault_id = data.azurerm_key_vault.kv.id
   
   depends_on = [
-    azurerm_role_assignment.kv_terraform
+    azurerm_role_assignment.kv_terraform,
+    azurerm_role_assignment.terraform_keyvault_admin
   ]
+  
+  lifecycle {
+    create_before_destroy = true
+    ignore_changes = [
+      value
+    ]
+  }
 }
 
 resource "azurerm_key_vault_secret" "airflow_postgres_db" {
@@ -37,7 +45,8 @@ resource "azurerm_key_vault_secret" "airflow_postgres_db" {
   key_vault_id = data.azurerm_key_vault.kv.id
   
   depends_on = [
-    azurerm_role_assignment.kv_terraform
+    azurerm_role_assignment.kv_terraform,
+    azurerm_role_assignment.terraform_keyvault_admin
   ]
 }
 
@@ -47,7 +56,8 @@ resource "azurerm_key_vault_secret" "airflow_postgres_user" {
   key_vault_id = data.azurerm_key_vault.kv.id
   
   depends_on = [
-    azurerm_role_assignment.kv_terraform
+    azurerm_role_assignment.kv_terraform,
+    azurerm_role_assignment.terraform_keyvault_admin
   ]
 }
 
@@ -58,7 +68,8 @@ resource "azurerm_key_vault_secret" "airflow_admin_user" {
   key_vault_id = data.azurerm_key_vault.kv.id
   
   depends_on = [
-    azurerm_role_assignment.kv_terraform
+    azurerm_role_assignment.kv_terraform,
+    azurerm_role_assignment.terraform_keyvault_admin
   ]
 }
 
@@ -66,6 +77,10 @@ resource "azurerm_key_vault_secret" "airflow_admin_password" {
   name         = "airflow-admin-password"
   value        = random_password.airflow_admin_password.result
   key_vault_id = data.azurerm_key_vault.kv.id
+
+  depends_on = [ 
+    azurerm_role_assignment.terraform_keyvault_admin 
+  ]
 }
 
 resource "azurerm_key_vault_secret" "airflow_admin_email" {
@@ -74,6 +89,7 @@ resource "azurerm_key_vault_secret" "airflow_admin_email" {
   key_vault_id = data.azurerm_key_vault.kv.id
   
   depends_on = [
-    azurerm_role_assignment.kv_terraform
+    azurerm_role_assignment.kv_terraform,
+    azurerm_role_assignment.terraform_keyvault_admin 
   ]
 }

@@ -112,6 +112,17 @@ resource "azurerm_private_dns_zone_virtual_network_link" "postgres" {
 # Key Vault access policies
 data "azurerm_client_config" "current" {}
 
+# Ensure Terraform has Key Vault Administrator permissions
+resource "azurerm_role_assignment" "terraform_keyvault_admin" {
+  scope                = data.azurerm_key_vault.kv.id
+  role_definition_name = "Key Vault Administrator"
+  principal_id         = data.azurerm_client_config.current.object_id
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 # Store PostgreSQL password in Key Vault
 resource "azurerm_key_vault_secret" "postgres_password" {
   name         = "airflow-postgres-password"
@@ -119,7 +130,7 @@ resource "azurerm_key_vault_secret" "postgres_password" {
   key_vault_id = data.azurerm_key_vault.kv.id
 
   depends_on = [
-    azurerm_role_assignment.kv_terraform
+    azurerm_role_assignment.terraform_keyvault_admin
   ]
 
   lifecycle {
