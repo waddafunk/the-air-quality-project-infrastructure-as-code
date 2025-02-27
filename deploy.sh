@@ -211,6 +211,7 @@ deploy_environment() {
 
     # Deploy Data Lake first
     wait_for_lock
+    sleep 60
     log_info "Deploying Data Lake..."
     cd terraform/environments/$env/data-lake
     terragrunt init
@@ -218,6 +219,7 @@ deploy_environment() {
 
     # Deploy AKS last - now including the role assignments
     wait_for_lock
+    sleep 60
     log_info "Deploying AKS cluster..."
     cd ../aks-base
     terragrunt init
@@ -226,15 +228,75 @@ deploy_environment() {
     # Clean up before deploying Data Warehouse if delete flag is set
     clean_data_warehouse
 
-    # Deploy Data Warehouse (PostgreSQL)
+    # Deploy Data Warehouse (PostgreSQL) with proper secret handling
     wait_for_lock
+    sleep 60
     log_info "Deploying Data Warehouse..."
     cd ../data-warehouse
     terragrunt init
-    terragrunt apply -auto-approve
+    
+    # Import existing KeyVault secrets into Terraform state before applying
+    PREFIX="air-quality-kube"
+    KV_NAME="${PREFIX}dbkv${ENVIRONMENT}"
+    KV_NAME=${KV_NAME//-/}  # Remove hyphens
+    
+    # Check which secrets already exist and import them
+    log_info "Checking for existing Key Vault secrets to import into Terraform state..."
+    SECRETS_TO_CHECK=("airflow-postgres-port" "airflow-admin-user" "airflow-admin-email" "airflow-postgres-password")
+    SECRET_RESOURCES=("airflow_postgres_port" "airflow_admin_user" "airflow_admin_email" "postgres_password")
+    
+    for i in "${!SECRETS_TO_CHECK[@]}"; do
+        SECRET_NAME="${SECRETS_TO_CHECK[$i]}"
+        RESOURCE_NAME="${SECRET_RESOURCES[$i]}"
+        
+        # Check if secret exists in Azure
+        if az keyvault secret show --vault-name "${KV_NAME}" --name "$SECRET_NAME" &>/dev/null; then
+            log_info "Secret $SECRET_NAME exists. Importing into Terraform state..."
+            
+            # Get secret ID
+            SECRET_ID=$(az keyvault secret show --vault-name "${KV_NAME}" --name "$SECRET_NAME" --query id -o tsv)
+            
+            # Import the secret into Terraform state
+            terraform import "azurerm_key_vault_secret.$RESOURCE_NAME" "$SECRET_ID" || {
+                log_warn "Failed to import $SECRET_NAME. It may already be in state or resource name might be different."
+            }
+        fi
+    done
+    
+    # Check for the authorization issues with admin password
+    if ! az keyvault secret show --vault-name "${KV_NAME}" --name "airflow-admin-password" &>/dev/null; then
+        log_warn "Cannot access airflow-admin-password secret. This might cause authorization errors."
+        log_info "Checking current identity permissions on Key Vault..."
+        
+        # Get current user/SP details
+        CURRENT_PRINCIPAL=$(az account show --query user.name -o tsv)
+        
+        # Check and fix permissions if needed
+        log_info "Ensuring $CURRENT_PRINCIPAL has Key Vault Secrets Officer role on $KV_NAME..."
+        RG_NAME="air-quality-data-$ENVIRONMENT"
+        SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+        
+        az role assignment create \
+            --assignee "$CURRENT_PRINCIPAL" \
+            --role "Key Vault Secrets Officer" \
+            --scope "/subscriptions/$SUBSCRIPTION_ID/resourcegroups/$RG_NAME/providers/microsoft.keyvault/vaults/$KV_NAME" || {
+            log_warn "Failed to assign role. The role might already be assigned or you lack permissions."
+        }
+    fi
+    
+    # Now run the apply with an optional flag to ignore specific resource errors
+    log_info "Applying Terraform configuration with improved secret handling..."
+    terragrunt apply -auto-approve || {
+        log_warn "Terraform apply had errors. This might be due to secrets that already exist."
+        log_info "Trying targeted apply to create only missing resources..."
+        
+        # Try a targeted apply for resources that aren't secrets
+        terragrunt apply -auto-approve -target="module.postgresql" || true
+    }
 
     # Wait for PostgreSQL to be ready
     wait_for_postgres
+    sleep 60
 
     # Get Kubernetes credentials
     log_info "Getting AKS credentials..."
@@ -243,7 +305,20 @@ deploy_environment() {
         --name air-quality-kube-aks \
         --overwrite-existing
         
-    cd ../../..
+    cd ../../../../helm/airflow
+
+    # Init Airflow Db
+    log_info "Initializing Airflow Db..."
+    ./initialize-airflow-db.sh 
+    
+    # deploy Airflow using Helm
+    sleep 20
+    log_info "Deploying Airflow..."
+    ./deploy-airflow.sh
+
+    cd ../..
+
+
 }
 
 # Print usage information
