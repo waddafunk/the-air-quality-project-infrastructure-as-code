@@ -211,7 +211,7 @@ deploy_environment() {
 
     # Deploy Data Lake first
     wait_for_lock
-    sleep 60
+    sleep 150
     log_info "Deploying Data Lake..."
     cd terraform/environments/$env/data-lake
     terragrunt init
@@ -219,7 +219,7 @@ deploy_environment() {
 
     # Deploy AKS last - now including the role assignments
     wait_for_lock
-    sleep 60
+    sleep 150
     log_info "Deploying AKS cluster..."
     cd ../aks-base
     terragrunt init
@@ -230,7 +230,7 @@ deploy_environment() {
 
     # Deploy Data Warehouse (PostgreSQL) with proper secret handling
     wait_for_lock
-    sleep 60
+    sleep 150
     log_info "Deploying Data Warehouse..."
     cd ../data-warehouse
     terragrunt init
@@ -296,7 +296,7 @@ deploy_environment() {
 
     # Wait for PostgreSQL to be ready
     wait_for_postgres
-    sleep 60
+    sleep 150
 
     # Get Kubernetes credentials
     log_info "Getting AKS credentials..."
