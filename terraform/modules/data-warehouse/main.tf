@@ -117,7 +117,8 @@ resource "azurerm_role_assignment" "terraform_keyvault_admin" {
   scope                = data.azurerm_key_vault.kv.id
   role_definition_name = "Key Vault Administrator"
   principal_id         = data.azurerm_client_config.current.object_id
-
+  name                 = uuid() # This creates a unique name each time
+  
   lifecycle {
     create_before_destroy = true
   }
