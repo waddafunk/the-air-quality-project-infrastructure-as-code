@@ -1,4 +1,6 @@
 # modules/data-lake/main.tf
+data "azurerm_client_config" "current" {}
+
 
 resource "azurerm_resource_group" "rg" {
   name     = var.resource_group_name
@@ -25,15 +27,19 @@ resource "azurerm_storage_container" "containers" {
   container_access_type = "private"
 }
 
-# Add RBAC for AKS to access Data Lake
-resource "azurerm_role_assignment" "aks_storage_role" {
-  scope                = azurerm_storage_account.storage.id
-  role_definition_name = "Storage Blob Data Contributor"
-  principal_id         = data.azurerm_kubernetes_cluster.aks.identity[0].principal_id
-}
+resource "azurerm_key_vault" "kv" {
+  name                       = replace("${var.prefix}dbkv${var.environment}", "-", "")
+  location                   = var.location
+  resource_group_name        = azurerm_resource_group.rg.name
+  tenant_id                  = data.azurerm_client_config.current.tenant_id
+  sku_name                   = "standard"
+  purge_protection_enabled   = false
+  enable_rbac_authorization  = true  # Enable RBAC instead of access policies
 
-# Data source for AKS cluster
-data "azurerm_kubernetes_cluster" "aks" {
-  name                = "${var.prefix}-aks"
-  resource_group_name = "${var.prefix}-${var.environment}"
+  network_acls {
+    default_action = "Allow"
+    bypass         = "AzureServices"
+  }
+
+  tags = var.tags
 }

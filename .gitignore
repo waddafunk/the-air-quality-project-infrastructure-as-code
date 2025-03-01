@@ -20,7 +20,7 @@ override.tf.json
 
 # Ignore environment-specific variable files
 .env
-*.env
+*.env*
 
 # Ignore CLI configuration files
 .terraformrc
