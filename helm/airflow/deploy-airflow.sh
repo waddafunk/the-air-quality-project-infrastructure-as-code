@@ -1,6 +1,9 @@
 #!/bin/bash
 
-# will load $GIT_USERNAME, $GIT_PASSWORD, $GIT_REPO_URL
+# will load GIT_USERNAME, GIT_PASSWORD, GIT_REPO_URL
+# AIRFLOW_NAME, AIRFLOW_NAMESPACE, ENV, AIRFLOW_ADMIN_USER, 
+# AIRFLOW_ADMIN_PASSWORD, AIRFLOW_ADMIN_EMAIL
+# if not present create a .env-airflow file and assign these values
 source .env-airflow 
 
 set -e  # Exit on any error
@@ -33,15 +36,13 @@ for cmd in kubectl helm az; do
 done
 
 # Environment Variables
-AIRFLOW_NAME="airflow-cluster"
-AIRFLOW_NAMESPACE="airflow"
-KV_NAME="airqualitykubedbkvdev"  # Key Vault name from your terraform code
-RESOURCE_GROUP="air-quality-db-dev"  # Resource group where Key Vault is located
+KV_NAME="airqualitykubedbkv${ENV}"  # Key Vault name from your terraform code
+RESOURCE_GROUP="air-quality-db-${ENV}"  # Resource group where Key Vault is located
 
 log_info "Getting credentials from Azure Key Vault..."
 
 # Get PostgreSQL connection details from Key Vault
-POSTGRES_HOST=$(az keyvault secret show --vault-name "$KV_NAME" --name "airflow-postgres-host" --query value -o tsv 2>/dev/null || echo "air-quality-kube-airflow-pg-dev.postgres.database.azure.com")
+POSTGRES_HOST=$(az keyvault secret show --vault-name "$KV_NAME" --name "airflow-postgres-host" --query value -o tsv 2>/dev/null || echo "air-quality-kube-airflow-pg-${ENV}.postgres.database.azure.com")
 POSTGRES_USER=$(az keyvault secret show --vault-name "$KV_NAME" --name "airflow-postgres-user" --query value -o tsv 2>/dev/null || echo "airflow_admin")
 POSTGRES_PASSWORD=$(az keyvault secret show --vault-name "$KV_NAME" --name "airflow-postgres-password" --query value -o tsv)
 FERNET_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
@@ -50,7 +51,7 @@ WEBSERVER_SECRET_KEY=$(python -c "import secrets; print(secrets.token_hex(32))")
 # If the secrets don't exist, create them
 if [ -z "$POSTGRES_HOST" ]; then
     log_warn "PostgreSQL host secret not found in Key Vault. Using default FQDN."
-    POSTGRES_HOST="air-quality-kube-airflow-pg-dev.postgres.database.azure.com"
+    POSTGRES_HOST="air-quality-kube-airflow-pg-${ENV}.postgres.database.azure.com"
     
     # Store the secret in Key Vault for future use
     az keyvault secret set --vault-name "$KV_NAME" --name "airflow-postgres-host" --value "$POSTGRES_HOST"
@@ -64,20 +65,15 @@ if [ -z "$POSTGRES_USER" ]; then
     az keyvault secret set --vault-name "$KV_NAME" --name "airflow-postgres-user" --value "$POSTGRES_USER"
 fi
 
-# Get admin credentials from Key Vault
-AIRFLOW_ADMIN_USER=$(az keyvault secret show --vault-name "$KV_NAME" --name "airflow-admin-user" --query value -o tsv 2>/dev/null || echo "admin")
-AIRFLOW_ADMIN_PASSWORD=$(az keyvault secret show --vault-name "$KV_NAME" --name "airflow-admin-password" --query value -o tsv 2>/dev/null || echo "admin")
-AIRFLOW_ADMIN_EMAIL=$(az keyvault secret show --vault-name "$KV_NAME" --name "airflow-admin-email" --query value -o tsv 2>/dev/null || echo "admin@example.com")
 
 log_info "Using admin credentials from Key Vault:"
 echo "Username: $AIRFLOW_ADMIN_USER"
-echo "Password: (retrieved from Key Vault)"
 echo "Email: $AIRFLOW_ADMIN_EMAIL"
 
 # Get Airflow Managed Identity Client ID (if you're using Workload Identity)
 AIRFLOW_MANAGED_IDENTITY_CLIENT_ID=$(az identity show \
     --name air-quality-kube-airflow-identity \
-    --resource-group air-quality-kube-dev \
+    --resource-group "air-quality-kube-${ENV}" \
     --query 'clientId' -o tsv 2>/dev/null || echo "")
 
 # Create Airflow namespace if it doesn't exist
@@ -162,7 +158,6 @@ log_info "Run the following command to access the Airflow UI:"
 echo "kubectl port-forward svc/$AIRFLOW_NAME-web 8080:8080 -n $AIRFLOW_NAMESPACE"
 log_info "Then open your browser to: http://localhost:8080"
 log_info "Username: $AIRFLOW_ADMIN_USER"
-log_info "Password: $AIRFLOW_ADMIN_PASSWORD"
 
 # Clean up temporary files
 rm -f airflow-values-with-creds.yaml

@@ -73,7 +73,7 @@ airflow:
     - username: "${AIRFLOW_ADMIN_USER}"
       password: "${AIRFLOW_ADMIN_PASSWORD}"
       role: Admin
-      email: admin@example.com
+      email: "{AIRFLOW_ADMIN_EMAIL}"
       firstName: admin
       lastName: admin
 
