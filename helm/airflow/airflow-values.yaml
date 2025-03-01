@@ -1427,7 +1427,7 @@ dags:
   gitSync:
     ## if the git-sync sidecar container is enabled
     ##
-    enabled: false
+    enabled: true
 
     ## the git-sync container image
     ##
@@ -1444,17 +1444,7 @@ dags:
     ##
     resources: {}
 
-    ## the url of the git repo
-    ##
-    ## ____ EXAMPLE _______________
-    ##   # https git repo
-    ##   repo: "https://github.com/USERNAME/REPOSITORY.git"
-    ##
-    ## ____ EXAMPLE _______________
-    ##   # ssh git repo
-    ##   repo: "git@github.com:USERNAME/REPOSITORY.git"
-    ##
-    repo: ""
+    repo: "${GIT_REPO_URL}"
 
     ## the sub-path within your repo where dags are located
     ## - only dags under this path within your repo will be seen by airflow,
@@ -1464,7 +1454,7 @@ dags:
 
     ## the git branch to check out
     ##
-    branch: master
+    branch: main
 
     ## the git revision (tag or hash) to check out
     ##
@@ -1493,11 +1483,11 @@ dags:
 
     ## the key in `dags.gitSync.httpSecret` with your git username
     ##
-    httpSecretUsernameKey: username
+    httpSecretUsernameKey: "${GIT_USERNAME}"
 
     ## the key in `dags.gitSync.httpSecret` with your git password/token
     ##
-    httpSecretPasswordKey: password
+    httpSecretPasswordKey: "${GIT_PASSWORD}"
 
     ## the name of a pre-created Secret with git ssh credentials
     ##

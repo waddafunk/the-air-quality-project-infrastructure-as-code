@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# will load $GIT_USERNAME, $GIT_PASSWORD, $GIT_REPO_URL
+source .env-airflow 
+
 set -e  # Exit on any error
 
 # Color codes for output
@@ -105,6 +108,10 @@ sed -i "s|\${AIRFLOW_ADMIN_PASSWORD}|$AIRFLOW_ADMIN_PASSWORD|g" airflow-values-w
 sed -i "s|\${AIRFLOW_ADMIN_EMAIL}|$AIRFLOW_ADMIN_EMAIL|g" airflow-values-with-creds.yaml
 sed -i "s|\${WEBSERVER_SECRET_KEY}|$WEBSERVER_SECRET_KEY|g" airflow-values-with-creds.yaml
 sed -i "s|\${FERNET_KEY}|$FERNET_KEY|g" airflow-values-with-creds.yaml
+sed -i "s|\${GIT_USERNAME}|$GIT_USERNAME|g" airflow-values-with-creds.yaml
+sed -i "s|\${GIT_PASSWORD}|$GIT_PASSWORD|g" airflow-values-with-creds.yaml
+sed -i "s|\${GIT_REPO_URL}|$GIT_REPO_URL|g" airflow-values-with-creds.yaml
+
 
 # Replace Workload Identity Client ID if available
 if [ ! -z "$AIRFLOW_MANAGED_IDENTITY_CLIENT_ID" ]; then
