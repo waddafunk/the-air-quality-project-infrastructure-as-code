@@ -118,6 +118,9 @@ else
     sed -i "/\${AIRFLOW_MANAGED_IDENTITY_CLIENT_ID}/d" airflow-values-with-creds.yaml
 fi
 
+log_info "Creating runtime anvironment variables..."
+source ./create-kube-variables.sh
+
 # Add Airflow helm repo if it doesn't exist
 log_info "Adding Airflow Helm repository..."
 helm repo add airflow-stable https://airflow-helm.github.io/charts || true
