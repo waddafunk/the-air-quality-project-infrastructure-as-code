@@ -24,6 +24,7 @@ generate "provider" {
   contents  = <<EOF
 provider "azurerm" {
   features {}
+  subscription_id = "${get_env("ARM_SUBSCRIPTION_ID", "")}"
 }
 
 terraform {

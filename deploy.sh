@@ -364,6 +364,9 @@ fi
 # Main deployment function
 main() {
     log_info "Starting deployment for $ENVIRONMENT environment..."
+
+    SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+    export ARM_SUBSCRIPTION_ID="${SUBSCRIPTION_ID}"
     
     if [ "$DELETE_WAREHOUSE" = true ]; then
         log_warn "Delete mode enabled: Existing resources will be deleted before deployment"
