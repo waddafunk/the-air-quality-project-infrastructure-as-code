@@ -231,7 +231,11 @@ airflow:
   ##   extraPipPackages:
   ##     - "SomeProject==1.0.0"
   ##
-  extraPipPackages: []
+  extraPipPackages: 
+    - "azure-identity>=1.10.0"
+    - "azure-storage-file-datalake>=12.8.0"
+    - "pandas>=2.0.0"
+    - "requests>=2.28.0"
 
   ## pip packages that are protected from upgrade/downgrade by `extraPipPackages`
   ## - [WARNING] Pods will fail to start if `extraPipPackages` would cause these packages to change versions
@@ -243,7 +247,50 @@ airflow:
   ## - spec for EnvVar:
   ##   https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.29/#envvar-v1-core
   ##
-  extraEnv: []
+  extraEnv: 
+    # Variables from ConfigMap
+    - name: ENVIRONMENT
+      valueFrom:
+        configMapKeyRef:
+          name: airflow-configmap
+          key: ENVIRONMENT
+    - name: LOG_LEVEL
+      valueFrom:
+        configMapKeyRef:
+          name: airflow-configmap
+          key: LOG_LEVEL
+    - name: ENERGY_DATA_URL
+      valueFrom:
+        configMapKeyRef:
+          name: airflow-configmap
+          key: ENERGY_DATA_URL
+    - name: DATA_LAKE_RESOURCE_GROUP
+      valueFrom:
+        configMapKeyRef:
+          name: airflow-configmap
+          key: DATA_LAKE_RESOURCE_GROUP
+    - name: PREFIX
+      valueFrom:
+        configMapKeyRef:
+          name: airflow-configmap
+          key: PREFIX
+          
+    # Variables from Secret
+    - name: OPENAQ_API_KEY
+      valueFrom:
+        secretKeyRef:
+          name: airflow-secrets
+          key: OPENAQ_API_KEY
+    - name: EIA_API_KEY
+      valueFrom:
+        secretKeyRef:
+          name: airflow-secrets
+          key: EIA_API_KEY
+    - name: DATA_LAKE_KEY
+      valueFrom:
+        secretKeyRef:
+          name: airflow-secrets
+          key: DATA_LAKE_KEY
 
   ## extra containers for the airflow Pods
   ## - spec for Container:

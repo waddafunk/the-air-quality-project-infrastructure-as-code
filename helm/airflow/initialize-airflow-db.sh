@@ -25,6 +25,24 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# URL encode a string
+urlencode() {
+    local string="$1"
+    local length="${#string}"
+    local encoded=""
+    local pos c o
+    
+    for (( pos=0 ; pos<length ; pos++ )); do
+        c="${string:$pos:1}"
+        case "$c" in
+            [-_.~a-zA-Z0-9] ) o="${c}" ;;
+            * )               printf -v o '%%%02x' "'$c"
+        esac
+        encoded+="${o}"
+    done
+    echo "${encoded}"
+}
+
 # Check if required tools are installed
 for cmd in kubectl az; do
     if ! command -v $cmd &> /dev/null; then
@@ -53,6 +71,9 @@ if [ -z "$POSTGRES_PASSWORD" ]; then
     log_error "Could not retrieve PostgreSQL password from Key Vault"
     exit 1
 fi
+
+# URL encode the password to handle special characters
+POSTGRES_PASSWORD_ENCODED=$(urlencode "$POSTGRES_PASSWORD")
 
 log_info "Connection details:"
 echo "Host: $POSTGRES_HOST"
@@ -135,7 +156,7 @@ spec:
     command: ["sleep", "600"]
     env:
     - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
-      value: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:5432/${POSTGRES_DB}?sslmode=require
+      value: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD_ENCODED}@${POSTGRES_HOST}:5432/${POSTGRES_DB}?sslmode=require
     - name: AIRFLOW__CORE__FERNET_KEY
       value: UKMzEm3yIuL_GiAiRPl0sMRosgSY25Q9At-0LjqXpWs=
     - name: AIRFLOW__LOGGING__LOGGING_LEVEL
