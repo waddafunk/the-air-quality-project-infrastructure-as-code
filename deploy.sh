@@ -298,6 +298,13 @@ deploy_environment() {
     wait_for_postgres
     sleep 150
 
+    wait_for_lock
+    sleep 150
+    log_info "Deploying AzureML..."
+    cd ../azureml
+    terragrunt init
+    terragrunt apply -auto-approve
+
     # Get Kubernetes credentials
     log_info "Getting AKS credentials..."
     az aks get-credentials \
