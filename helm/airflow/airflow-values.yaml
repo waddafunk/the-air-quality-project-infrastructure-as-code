@@ -236,6 +236,9 @@ airflow:
     - "azure-storage-file-datalake>=12.8.0"
     - "pandas>=2.0.0"
     - "requests>=2.28.0"
+    - "psycopg2-binary"
+    - "apache-airflow-providers-postgres"
+    - "requests"
 
   ## pip packages that are protected from upgrade/downgrade by `extraPipPackages`
   ## - [WARNING] Pods will fail to start if `extraPipPackages` would cause these packages to change versions
@@ -291,6 +294,27 @@ airflow:
         secretKeyRef:
           name: airflow-secrets
           key: DATA_LAKE_KEY
+    - name: POSTGRES_HOST
+      valueFrom:
+        secretKeyRef:
+          name: airflow-secrets
+          key: POSTGRES_HOST
+    - name: POSTGRES_USER
+      valueFrom:
+        secretKeyRef:
+          name: airflow-secrets
+          key: POSTGRES_USER
+    - name: POSTGRES_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: airflow-secrets
+          key: POSTGRES_PASSWORD
+    - name: POSTGRES_PORT
+      valueFrom:
+        secretKeyRef:
+          name: airflow-secrets
+          key: POSTGRES_PORT
+    
 
   ## extra containers for the airflow Pods
   ## - spec for Container:
@@ -1239,7 +1263,7 @@ triggerer:
 flower:
   ## if the airflow flower UI should be deployed
   ##
-  enabled: true
+  enabled: false
 
   ## the number of flower Pods to run
   ## - if you set this >1 we recommend defining a `flower.podDisruptionBudget`
