@@ -61,13 +61,6 @@ resource "azurerm_postgresql_flexible_server_database" "airflow" {
   }
 }
 
-# Use role assignments instead of access policies
-resource "azurerm_role_assignment" "kv_terraform" {
-  scope                = data.azurerm_key_vault.kv.id
-  role_definition_name = "Key Vault Administrator"
-  principal_id         = data.azurerm_client_config.current.object_id
-}
-
 resource "azurerm_role_assignment" "kv_aks" {
   scope                = data.azurerm_key_vault.kv.id
   role_definition_name = "Key Vault Secrets User"

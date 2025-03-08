@@ -15,7 +15,6 @@ resource "azurerm_key_vault_secret" "airflow_postgres_host" {
   key_vault_id = data.azurerm_key_vault.kv.id
   
   depends_on = [
-    azurerm_role_assignment.kv_terraform,
     azurerm_role_assignment.terraform_keyvault_admin
   ]
   
@@ -27,7 +26,6 @@ resource "azurerm_key_vault_secret" "airflow_postgres_port" {
   key_vault_id = data.azurerm_key_vault.kv.id
   
   depends_on = [
-    azurerm_role_assignment.kv_terraform,
     azurerm_role_assignment.terraform_keyvault_admin
   ]
   
@@ -45,7 +43,6 @@ resource "azurerm_key_vault_secret" "airflow_postgres_db" {
   key_vault_id = data.azurerm_key_vault.kv.id
   
   depends_on = [
-    azurerm_role_assignment.kv_terraform,
     azurerm_role_assignment.terraform_keyvault_admin
   ]
 }
@@ -56,7 +53,6 @@ resource "azurerm_key_vault_secret" "airflow_postgres_user" {
   key_vault_id = data.azurerm_key_vault.kv.id
   
   depends_on = [
-    azurerm_role_assignment.kv_terraform,
     azurerm_role_assignment.terraform_keyvault_admin
   ]
 }
@@ -68,7 +64,6 @@ resource "azurerm_key_vault_secret" "airflow_admin_user" {
   key_vault_id = data.azurerm_key_vault.kv.id
   
   depends_on = [
-    azurerm_role_assignment.kv_terraform,
     azurerm_role_assignment.terraform_keyvault_admin
   ]
 }
@@ -89,7 +84,6 @@ resource "azurerm_key_vault_secret" "airflow_admin_email" {
   key_vault_id = data.azurerm_key_vault.kv.id
   
   depends_on = [
-    azurerm_role_assignment.kv_terraform,
     azurerm_role_assignment.terraform_keyvault_admin 
   ]
 }
