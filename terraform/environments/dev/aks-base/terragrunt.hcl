@@ -34,9 +34,9 @@ inputs = {
   
   # AKS specific configurations
   kubernetes_version     = "1.30"
-  node_count_min        = 2 
-  node_count_max        = 20
-  node_size             = "Standard_D4s_v3"
+  node_count_min        = 1 
+  node_count_max        = 3
+  node_size             = "Standard_D2s_v3" 
   os_disk_size_gb       = 128
   
   # Networking
