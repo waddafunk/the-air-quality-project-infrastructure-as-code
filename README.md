@@ -42,6 +42,7 @@ graph TB
         
         subgraph "Resource Group: analytics-[env]"
             DB["Databricks<br/>Workspace"]
+            DBID["Managed Identity<br/>air-quality-kube-databricks-identity"]
             DBSUBNETS["Databricks Subnets<br/>(Public & Private)"]
         end
         
@@ -56,14 +57,15 @@ graph TB
     MSID -->|Workload Identity| DL
     MSID -->|Secrets Access| KV
     PG --> KV
-    DB -->|Access Data| DL
+    DBID -->|RBAC Access| DL
+    DBID -->|Secrets Access| KV
     RAW & PROCESSED & CURATED ---|"Part of"| DL
     
     classDef azure fill:#0072C6,stroke:#fff,stroke-width:2px,color:#fff
     classDef storage fill:#3498DB,stroke:#fff,stroke-width:2px,color:#fff
     classDef container fill:#2ECC71,stroke:#fff,stroke-width:2px,color:#fff
     
-    class AKS,DL,TFSTATE,PG,KV,MSID,DB azure
+    class AKS,DL,TFSTATE,PG,KV,MSID,DB,DBID azure
     class RAW,PROCESSED,CURATED container
     class AKSSUBNET,PGSUBNET,DBSUBNETS storage
 ```
@@ -773,3 +775,4 @@ terragrunt validate
 - Use consistent indentation (2 spaces)
 - Include meaningful variable descriptions
 - Always specify explicit versions for providers
+
