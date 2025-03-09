@@ -2,7 +2,15 @@
 
 ## Overview
 
-This repository contains the Infrastructure as Code (IaC) implementation for the Air Quality monitoring platform on Azure. The infrastructure is managed using Terraform and Terragrunt, providing a scalable, maintainable, and environment-agnostic approach to infrastructure deployment.
+This repository contains Infrastructure as Code (IaC) that deploys and manages a complete data platform for air quality monitoring on Azure. The platform consists of several key components:
+
+- **Data Collection and Storage**: Azure Data Lake Storage Gen2 for raw, processed, and curated data layers
+- **Data Processing**: Azure Kubernetes Service (AKS) running Apache Airflow for orchestration
+- **Data Analytics**: Azure Databricks for advanced analytics and machine learning
+- **Data Warehouse**: Azure PostgreSQL Flexible Server for structured data storage
+- **Security**: Azure Key Vault for secrets management and Managed Identities for secure authentication
+
+The infrastructure is implemented using Terraform modules with Terragrunt for environment management, enabling consistent deployment across development, staging, and production environments. The design follows Azure best practices with proper network isolation, RBAC permissions, and secrets management.
 
 ## Architecture Overview
 
@@ -32,6 +40,11 @@ graph TB
             PGSUBNET["PostgreSQL Subnet"]
         end
         
+        subgraph "Resource Group: analytics-[env]"
+            DB["Databricks<br/>Workspace"]
+            DBSUBNETS["Databricks Subnets<br/>(Public & Private)"]
+        end
+        
         subgraph "Resource Group: tf-state"
             TFSTATE["Terraform State<br/>Storage Account"]
         end
@@ -43,18 +56,19 @@ graph TB
     MSID -->|Workload Identity| DL
     MSID -->|Secrets Access| KV
     PG --> KV
+    DB -->|Access Data| DL
     RAW & PROCESSED & CURATED ---|"Part of"| DL
     
     classDef azure fill:#0072C6,stroke:#fff,stroke-width:2px,color:#fff
     classDef storage fill:#3498DB,stroke:#fff,stroke-width:2px,color:#fff
     classDef container fill:#2ECC71,stroke:#fff,stroke-width:2px,color:#fff
     
-    class AKS,DL,TFSTATE,PG,KV,MSID azure
+    class AKS,DL,TFSTATE,PG,KV,MSID,DB azure
     class RAW,PROCESSED,CURATED container
-    class AKSSUBNET,PGSUBNET storage
+    class AKSSUBNET,PGSUBNET,DBSUBNETS storage
 ```
 
-## Network Architecture
+### Network Architecture
 
 ```mermaid
 flowchart LR
@@ -69,6 +83,12 @@ flowchart LR
         subgraph "PostgreSQL Subnet"
             direction TB
             POSTGRES["PostgreSQL Flexible Server"]
+        end
+        
+        subgraph "Databricks Subnets"
+            direction TB
+            DBPUBLIC["Public Subnet"]
+            DBPRIVATE["Private Subnet"]
         end
         
         subgraph "Kubernetes Services"
@@ -86,13 +106,14 @@ flowchart LR
     AKS --> AIRFLOW
     AKS --> Storage["Data Lake Storage"]
     AIRFLOW -->|Private Endpoint| POSTGRES
+    AIRFLOW -->|Managed Identity| Storage
     
     classDef network fill:#2C3E50,stroke:#fff,stroke-width:2px,color:#fff
     classDef security fill:#E74C3C,stroke:#fff,stroke-width:2px,color:#fff
     classDef service fill:#3498DB,stroke:#fff,stroke-width:2px,color:#fff
     
     class NSG security
-    class AKS,DNS,AIRFLOW,SVC,POSTGRES service
+    class AKS,DNS,AIRFLOW,SVC,POSTGRES,DBPUBLIC,DBPRIVATE service
     class Internet,Storage network
 ```
 
@@ -116,6 +137,8 @@ sequenceDiagram
     T->>Az: Deploy PostgreSQL
     U->>T: terragrunt apply (aks-base)
     T->>Az: Deploy AKS & Identities
+    U->>T: terragrunt apply (databricks)
+    T->>Az: Deploy Databricks Workspace
     U->>K: Initialize Airflow DB
     U->>K: Deploy Airflow via Helm
     Az-->>U: Infrastructure Ready
@@ -125,8 +148,8 @@ sequenceDiagram
 
 ### AKS (Azure Kubernetes Service)
 - Production-grade Kubernetes cluster running latest Kubernetes v1.30
-- Auto-scaling enabled (2-20 nodes)
-- System node pool with D4s_v3 VMs
+- Auto-scaling enabled (1-3 nodes in dev, 2-20 nodes in prod)
+- System node pool with D2s_v3 VMs (dev) or D4s_v3 VMs (prod)
 - Azure CNI networking with Calico network policy
 - Workload Identity enabled for secure Azure service access
 - OIDC issuer for federated identity credentials
@@ -145,6 +168,12 @@ sequenceDiagram
 - Secure connectivity through private endpoints
 - Key Vault integration for secrets management
 - Automatic backups and maintenance window configuration
+
+### Databricks
+- Azure Databricks workspace for data engineering and machine learning
+- Custom VNet injection with public and private subnets
+- Managed Identity for secure access to Data Lake
+- Properly configured Network Security Groups
 
 ### Network Configuration
 - Secure virtual network configuration with dedicated subnets
@@ -170,13 +199,27 @@ sequenceDiagram
 
 ## Prerequisites
 
-- Azure CLI installed and configured (version 2.40.0+)
-- Terraform >= 1.0.0
-- Terragrunt >= 0.45.0
-- Helm >= 3.10.0
-- kubectl >= 1.26.0
-- Azure subscription with contributor permissions
-- Git
+Before deploying this infrastructure, you'll need:
+
+- **Local Development Environment**:
+  - Azure CLI (version 2.50.0+) installed and configured
+  - Terraform (version 1.5.0+)
+  - Terragrunt (version 0.50.0+)
+  - Helm (version 3.13.0+) 
+  - kubectl (version 1.28.0+)
+  - Git (version 2.39.0+)
+  - Python (version 3.9+) for running initialization scripts
+
+- **Azure Subscription Requirements**:
+  - Contributor permissions on the Azure subscription
+  - Service principal (if running in CI/CD) with Contributor permissions
+  - Quota for required VM sizes (D2s_v3, D4s_v3)
+  - Available regions that support all required services (PostgreSQL, AKS, Databricks)
+
+- **Configuration Requirements**:
+  - Git repository for storing Airflow DAGs (needed during Airflow deployment)
+  - SSH keys or credentials for Git access (for Airflow DAG syncing)
+  - Environment-specific configuration values (see Configuration section)
 
 ## Project Structure
 
@@ -187,12 +230,14 @@ sequenceDiagram
 │   │   ├── aks-base/          # AKS and networking infrastructure
 │   │   ├── bootstrap/         # Initial state storage setup
 │   │   ├── data-lake/         # Data Lake storage and Key Vault
-│   │   └── data-warehouse/    # PostgreSQL Flexible Server
+│   │   ├── data-warehouse/    # PostgreSQL Flexible Server
+│   │   └── databricks/        # Databricks workspace
 │   ├── environments/          # Environment-specific configurations
 │   │   ├── dev/
 │   │   │   ├── aks-base/      # Dev AKS configuration
 │   │   │   ├── data-lake/     # Dev Data Lake configuration
 │   │   │   ├── data-warehouse/# Dev Data Warehouse configuration
+│   │   │   ├── databricks/    # Dev Databricks configuration
 │   │   │   ├── dev.hcl        # Dev environment variables
 │   │   │   └── env.yaml       # Dev environment settings
 │   │   ├── prod/              # Production environment (similar structure)
@@ -205,8 +250,94 @@ sequenceDiagram
 │       └── initialize-airflow-db.sh # Database initialization script
 ├── deploy.sh                  # Main deployment script
 ├── delete-everything.sh       # Cleanup script
+├── export-subscription.sh     # Export subscription ID for Terraform
+├── flatten-terraform.sh       # Helper script to view all Terraform code
 └── README.md                  # This documentation
 ```
+
+## Configuration Parameters
+
+### Environment Configuration (env.yaml)
+
+The following parameters can be configured in the environment-specific `env.yaml` file:
+
+| Parameter   | Description                | Default (dev) | Default (prod) |
+|-------------|----------------------------|--------------|----------------|
+| environment | Environment name           | dev          | prod           |
+| location    | Azure region for resources | westeurope   | westeurope     |
+| prefix      | Resource name prefix       | air-quality-kube | air-quality-kube |
+
+### AKS Configuration
+
+| Parameter            | Description                   | Default (dev) | Default (prod) |
+|----------------------|-------------------------------|--------------|----------------|
+| kubernetes_version   | Kubernetes version            | 1.30         | 1.30           |
+| node_count_min       | Minimum node count            | 1            | 2              |
+| node_count_max       | Maximum node count            | 3            | 20             |
+| node_size            | VM size for nodes             | Standard_D2s_v3 | Standard_D4s_v3 |
+| os_disk_size_gb      | OS disk size in GB            | 128          | 128            |
+| vnet_address_space   | VNET address space            | ["10.0.0.0/16"] | ["10.0.0.0/16"] |
+| aks_subnet_address_prefix | AKS subnet CIDR          | ["10.0.1.0/24"] | ["10.0.1.0/24"] |
+| service_cidr         | K8s service CIDR              | "172.16.0.0/16" | "172.16.0.0/16" |
+| dns_service_ip       | K8s DNS service IP            | "172.16.0.10" | "172.16.0.10" |
+
+### Data Lake Configuration
+
+| Parameter                      | Description                 | Default         |
+|--------------------------------|-----------------------------|-----------------|
+| storage_account_tier           | Storage account tier        | "Standard"      |
+| storage_account_replication_type | Replication strategy     | "LRS"           |
+| data_lake_containers           | Data Lake containers        | ["raw", "processed", "curated"] |
+
+### Data Warehouse Configuration
+
+| Parameter                 | Description                    | Default        |
+|---------------------------|--------------------------------|----------------|
+| postgres_location         | PostgreSQL region              | "westeurope"   |
+| postgres_sku_name         | PostgreSQL SKU                 | "B_Standard_B1ms" (dev) |
+| postgres_version          | PostgreSQL version             | "15"           |
+| postgres_storage_mb       | Storage in MB                  | 32768 (32GB)   |
+| postgres_subnet_prefix    | PostgreSQL subnet CIDR         | ["10.0.2.0/24"] |
+| enable_public_access      | Enable public network access   | false          |
+
+### Databricks Configuration
+
+| Parameter                         | Description                    | Default        |
+|-----------------------------------|--------------------------------|----------------|
+| sku                               | Databricks SKU                 | "standard"     |
+| databricks_public_subnet_address_prefix | Public subnet CIDR      | ["10.0.3.0/24"] |
+| databricks_private_subnet_address_prefix | Private subnet CIDR    | ["10.0.4.0/24"] |
+| no_public_ip                      | Disable public IPs             | false (dev), true (prod) |
+
+### Airflow Deployment Variables
+
+The following environment variables are required for Airflow deployment (create a `.env-airflow` file):
+
+| Variable             | Description                         | Default         |
+|----------------------|-------------------------------------|-----------------|
+| GIT_USERNAME         | Git username for DAG repo           | -               |
+| GIT_PASSWORD         | Git password/token for DAG repo     | -               |
+| GIT_REPO_URL         | URL to Git repo containing DAGs     | -               |
+| AIRFLOW_NAME         | Name for Airflow Helm release       | "airflow"       |
+| AIRFLOW_NAMESPACE    | Kubernetes namespace for Airflow    | "airflow"       |
+| ENV                  | Environment name                    | "dev"           |
+
+The following runtime variables are created in `.env-airflow-runtime-variables`:
+
+| Variable               | Description                     | Auto-generated   |
+|------------------------|---------------------------------|------------------|
+| ENVIRONMENT            | Environment name                | Yes              |
+| LOG_LEVEL              | Logging level                   | "info"           |
+| ENERGY_DATA_URL        | URL for energy data source      | -                |
+| DATA_LAKE_RESOURCE_GROUP | Resource group for Data Lake  | "air-quality-data-[env]" |
+| PREFIX                 | Resource prefix                 | "air-quality-kube" |
+| OPENAQ_API_KEY         | OpenAQ API key                  | -                |
+| EIA_API_KEY            | Energy Information Admin API key| -                |
+| DATA_LAKE_KEY          | Auto-generated Data Lake key    | Yes              |
+| POSTGRES_HOST          | PostgreSQL hostname             | Yes              |
+| POSTGRES_USER          | PostgreSQL username             | Yes              |
+| POSTGRES_PASSWORD      | PostgreSQL password             | Yes              |
+| POSTGRES_PORT          | PostgreSQL port                 | "5432"           |
 
 ## Installation and Setup
 
@@ -221,15 +352,19 @@ cd azure-air-quality-infrastructure
 az login
 az account set --subscription "Your-Subscription-Name"
 
+# Export subscription ID for Terraform
+source ./export-subscription.sh
+
 # Initialize backend storage
 cd terraform/modules/bootstrap
 terraform init
-terraform apply
+terraform apply -auto-approve
+cd ../../..
 ```
 
 ### 2. Environment Configuration
 
-You can customize the environment by updating the environment configuration in `terraform/environments/dev/env.yaml`:
+Update the environment configuration in `terraform/environments/dev/env.yaml` or create a new environment:
 
 ```yaml
 environment: dev
@@ -237,7 +372,7 @@ location: westeurope
 prefix: air-quality-kube
 ```
 
-### 3. Deploy Infrastructure
+### 3. Deploy Complete Infrastructure
 
 Use the provided deployment script to set up the entire infrastructure:
 
@@ -246,29 +381,28 @@ Use the provided deployment script to set up the entire infrastructure:
 ./deploy.sh --environment dev
 
 # For production
-./deploy.sh --environment prod
+./deploy.sh --environment prod --delete-warehouse
 ```
 
 The script will deploy the following components in order:
 1. Bootstrap (if not already deployed)
 2. Data Lake and Key Vault
-3. PostgreSQL Flexible Server
-4. AKS Cluster with networking
-5. Airflow database initialization
-6. Airflow using Helm
+3. AKS Cluster with networking
+4. PostgreSQL Flexible Server
+5. Databricks workspace
+6. Airflow database initialization
+7. Airflow using Helm
 
-#### Manual Deployment
+#### 4. Manual Step-by-Step Deployment
 
-For step-by-step manual deployment:
+For step-by-step manual deployment or understanding each component:
 
 ```bash
+# Export subscription ID for Terraform
+source ./export-subscription.sh
+
 # Deploy Data Lake
 cd terraform/environments/dev/data-lake
-terragrunt init
-terragrunt apply
-
-# Deploy Data Warehouse
-cd ../data-warehouse
 terragrunt init
 terragrunt apply
 
@@ -277,43 +411,133 @@ cd ../aks-base
 terragrunt init
 terragrunt apply
 
+# Deploy Data Warehouse
+cd ../data-warehouse
+terragrunt init
+terragrunt apply
+
+# Deploy Databricks
+cd ../databricks
+terragrunt init
+terragrunt apply
+
+# Get Kubernetes credentials
+az aks get-credentials --resource-group air-quality-kube-dev --name air-quality-kube-aks --overwrite-existing
+
 # Initialize Airflow database
 cd ../../../helm/airflow
 ./initialize-airflow-db.sh
 
+# Set up Airflow environment variables
+cat > .env-airflow << EOL
+GIT_USERNAME=your-git-username
+GIT_PASSWORD=your-git-token
+GIT_REPO_URL=https://github.com/yourusername/airflow-dags.git
+AIRFLOW_NAME=airflow
+AIRFLOW_NAMESPACE=airflow
+ENV=dev
+AIRFLOW_ADMIN_USER=admin
+AIRFLOW_ADMIN_PASSWORD=admin-password
+AIRFLOW_ADMIN_EMAIL=admin@example.com
+EOL
+
+# Create runtime variables
+cat > .env-airflow-runtime-variables << EOL
+ENVIRONMENT=dev
+LOG_LEVEL=info
+ENERGY_DATA_URL=https://example.com/energy-data
+DATA_LAKE_RESOURCE_GROUP=air-quality-data-dev
+PREFIX=air-quality-kube
+OPENAQ_API_KEY=your-openaq-api-key
+EIA_API=your-eia-api-key
+DATA_LAKE_KEY=
+POSTGRES_PORT=5432
+EOL
+
+# Get Data Lake key
+./get-data-lake-key.sh
+
 # Deploy Airflow
 ./deploy-airflow.sh
+
+cd ../..
 ```
 
-## Module Configurations
+## Module Configuration Reference
 
 ### AKS Base Module (`terraform/modules/aks-base`)
 
-Key configurations available:
+This module deploys the AKS cluster and associated networking components.
+
+**Key configurations:**
 - `kubernetes_version`: Kubernetes version (default: "1.30")
-- `node_count_min`: Minimum nodes for autoscaling (default: 2)
-- `node_count_max`: Maximum nodes for autoscaling (default: 20)
-- `node_size`: VM size for nodes (default: "Standard_D4s_v3")
+- `node_count_min`: Minimum nodes for autoscaling (default: 1 for dev, 2 for prod)
+- `node_count_max`: Maximum nodes for autoscaling (default: 3 for dev, 20 for prod)
+- `node_size`: VM size for nodes (default: "Standard_D2s_v3" for dev, "Standard_D4s_v3" for prod)
 - `os_disk_size_gb`: OS disk size in GB (default: 128)
 - `vnet_address_space`: VNET address space (default: ["10.0.0.0/16"])
 - `aks_subnet_address_prefix`: AKS subnet CIDR (default: ["10.0.1.0/24"])
 
+The module creates:
+- Resource group for AKS resources
+- Virtual network and subnet
+- AKS cluster with system node pool
+- Managed Identity for Airflow
+- RBAC role assignments for Data Lake access
+- Federated Identity Credential for Workload Identity
+
 ### Data Lake Module (`terraform/modules/data-lake`)
 
-Key configurations available:
+This module deploys the Data Lake storage and Key Vault.
+
+**Key configurations:**
 - `storage_account_tier`: Storage account performance tier (default: "Standard")
 - `storage_account_replication_type`: Data replication strategy (default: "LRS")
 - `data_lake_containers`: List of containers to create (default: ["raw", "processed", "curated"])
 
+The module creates:
+- Resource group for data resources
+- Storage Account with Data Lake Gen2 capabilities
+- Storage containers
+- Key Vault with RBAC authorization
+
 ### Data Warehouse Module (`terraform/modules/data-warehouse`)
 
-Key configurations available:
+This module deploys the PostgreSQL Flexible Server.
+
+**Key configurations:**
 - `postgres_location`: PostgreSQL server location (default: "westeurope")
 - `postgres_sku_name`: PostgreSQL SKU tier (default: "B_Standard_B1ms")
 - `postgres_version`: PostgreSQL version (default: "15")
 - `postgres_storage_mb`: Storage in MB (default: 32768)
 - `postgres_subnet_prefix`: Subnet CIDR for PostgreSQL (default: ["10.0.2.0/24"])
 - `enable_public_access`: Control public network access (default: false)
+
+The module creates:
+- Resource group for database resources
+- Private DNS Zone for PostgreSQL
+- Subnet for PostgreSQL with delegation
+- PostgreSQL Flexible Server
+- Firewall rules to allow access from AKS
+- Secrets in Key Vault for database credentials
+
+### Databricks Module (`terraform/modules/databricks`)
+
+This module deploys the Databricks workspace.
+
+**Key configurations:**
+- `sku`: Databricks SKU (default: "standard")
+- `databricks_public_subnet_address_prefix`: Public subnet CIDR (default: ["10.0.3.0/24"])
+- `databricks_private_subnet_address_prefix`: Private subnet CIDR (default: ["10.0.4.0/24"])
+- `no_public_ip`: Disable public IPs (default: false for dev, true for prod)
+
+The module creates:
+- Resource group for analytics resources
+- Databricks workspace with VNet injection
+- Public and private subnets for Databricks
+- Network Security Group for Databricks
+- Managed Identity for Databricks
+- RBAC role assignments for Data Lake access
 
 ## Operations Guide
 
@@ -334,9 +558,18 @@ kubectl cluster-info
 kubectl port-forward svc/airflow-web 8080:8080 -n airflow
 
 # Access the UI at: http://localhost:8080
-# Default credentials can be retrieved from Key Vault:
+# Get credentials from Key Vault:
 az keyvault secret show --vault-name "airqualitykubedbkvdev" --name "airflow-admin-user" --query value -o tsv
 az keyvault secret show --vault-name "airqualitykubedbkvdev" --name "airflow-admin-password" --query value -o tsv
+```
+
+### Accessing Databricks Workspace
+
+```bash
+# Get Databricks workspace URL
+az databricks workspace show --resource-group air-quality-analytics-dev --name air-quality-kube-databricks-dev --query workspaceUrl -o tsv
+
+# Access via the Azure Portal or direct URL: https://<workspace-url>.azuredatabricks.net
 ```
 
 ### Managing Data Lake Access
@@ -352,6 +585,19 @@ az role assignment create \
     --scope [storage-account-id]
 ```
 
+### Connecting to PostgreSQL
+
+```bash
+# Get PostgreSQL connection details
+PGHOST=$(az keyvault secret show --vault-name "airqualitykubedbkvdev" --name "airflow-postgres-host" --query value -o tsv)
+PGUSER=$(az keyvault secret show --vault-name "airqualitykubedbkvdev" --name "airflow-postgres-user" --query value -o tsv)
+PGPASSWORD=$(az keyvault secret show --vault-name "airqualitykubedbkvdev" --name "airflow-postgres-password" --query value -o tsv)
+
+# Connect from within AKS (create a temporary pod)
+kubectl run pg-client --image=postgres:13 -it --rm --restart=Never -- \
+  /bin/bash -c "PGPASSWORD=$PGPASSWORD psql -h $PGHOST -U $PGUSER -d airflow"
+```
+
 ## Maintenance and Updates
 
 ### Updating Kubernetes Version
@@ -363,9 +609,21 @@ az role assignment create \
 ### Adding New Environments
 
 1. Copy the `dev` directory structure
-2. Update environment-specific configurations
-3. Create new environment file (e.g., `prod.hcl`)
-4. Update variables in `env.yaml`
+```bash
+cp -r terraform/environments/dev terraform/environments/staging
+```
+2. Update environment-specific configurations in `staging/env.yaml`
+3. Update any environment-specific overrides in `staging.hcl`
+4. Deploy using `./deploy.sh --environment staging`
+
+### Updating Airflow
+
+1. Update the Airflow image version in `helm/airflow/airflow-values.yaml`
+2. Redeploy Airflow:
+```bash
+cd helm/airflow
+./deploy-airflow.sh
+```
 
 ### Clean Up Resources
 
@@ -376,52 +634,142 @@ To delete all resources created by this infrastructure:
 ./delete-everything.sh
 ```
 
+## Integration Points
+
+The infrastructure provides the following integration points with other systems:
+
+### External Data Sources
+- **OpenAQ API**: Configured in Airflow via OPENAQ_API_KEY environment variable
+- **Energy Information Administration (EIA) API**: Configured in Airflow via EIA_API_KEY environment variable
+- **Custom Energy Data Source**: Configured in Airflow via ENERGY_DATA_URL environment variable
+
+### Git Integration
+- **DAG Repository**: Airflow is configured to sync DAGs from a Git repository
+- **Authentication**: Uses username/password or token authentication for Git access
+
+### Azure Services Integration
+- **Azure Monitor**: AKS, PostgreSQL, and Databricks are configured to send logs and metrics to Azure Monitor
+- **Azure Active Directory**: Integration for identity management
+- **Azure RBAC**: Used for permissions management across all resources
+
 ## Troubleshooting
 
-Common issues and solutions:
+### Terraform/Terragrunt Issues
 
 1. **Terragrunt initialization fails**
-   - Verify Azure credentials
-   - Check storage account access
-   - Ensure correct subscription is selected
+   - Verify Azure credentials with `az account show`
+   - Check if state storage exists: `az storage account show --name aqtfstatedev --resource-group terraform-state-dev`
+   - Ensure correct subscription is selected with `az account set --subscription "Your-Subscription-Name"`
+   - Check if Terraform state is locked: `az storage blob show --container-name tfstate --name "terraform.tfstate.tflock" --account-name aqtfstatedev`
 
-2. **AKS deployment fails**
-   - Verify VNET and subnet availability
-   - Check resource quota limits
-   - Ensure proper RBAC permissions
+2. **Resource quota limits exceeded**
+   - Check your subscription quotas in Azure Portal
+   - Request quota increase for VM sizes or services as needed
+   - Use `az vm list-usage --location westeurope` to check VM quota usage
 
-3. **PostgreSQL connectivity issues**
-   - Verify network security rules
-   - Check DNS zone links
-   - Ensure subnet delegation is properly configured
+### AKS Issues
 
-4. **Airflow deployment issues**
-   - Check PostgreSQL credentials in Key Vault
-   - Verify Kubernetes workload identity setup
-   - Examine pod logs with `kubectl logs -n airflow <pod-name>`
+1. **AKS deployment fails**
+   - Check VNET and subnet availability: `az network vnet list`
+   - Verify service principal permissions
+   - Check for regional outages: [Azure Status](https://status.azure.com)
+
+2. **Unable to connect to AKS**
+   - Refresh credentials: `az aks get-credentials --resource-group air-quality-kube-dev --name air-quality-kube-aks --overwrite-existing`
+   - Check if the cluster is running: `az aks show --resource-group air-quality-kube-dev --name air-quality-kube-aks --query provisioningState`
+
+### PostgreSQL Issues
+
+1. **PostgreSQL connectivity issues**
+   - Verify network security rules and private endpoints
+   - Check private DNS zone configuration
+   - Run test connection pod in AKS:
+     ```bash
+     kubectl run pg-test --image=postgres:13 -it --rm --restart=Never -- \
+       /bin/bash -c "apt-get update && apt-get install -y dnsutils && nslookup air-quality-kube-airflow-pg-dev.postgres.database.azure.com"
+     ```
+
+2. **Database initialization fails**
+   - Check PostgreSQL server status: `az postgres flexible-server show --name air-quality-kube-airflow-pg-dev --resource-group air-quality-db-dev`
+   - Check credentials in Key Vault
+   - Examine initialization pod logs: `kubectl logs airflow-db-init`
+
+### Airflow Deployment Issues
+
+1. **Airflow pods not starting**
+   - Check pod status: `kubectl get pods -n airflow`
+   - Examine pod logs: `kubectl logs -n airflow <pod-name>`
+   - Verify secrets exist: `kubectl get secrets -n airflow`
+
+2. **Git sync not working**
+   - Verify Git credentials
+   - Check git-sync container logs: `kubectl logs -n airflow <scheduler-pod-name> -c git-sync`
+   - Test Git repo accessibility
+
+3. **Workload Identity issues**
+   - Verify federated credential is set up correctly: `az identity federated-credential list --identity-name air-quality-kube-airflow-identity --resource-group air-quality-kube-dev`
+   - Check service account: `kubectl get serviceaccount airflow-service-account -n airflow`
 
 ## Security Considerations
 
-- All sensitive data is stored in Azure Key Vault
-- Managed identities are used for service authentication
-- Private networking is implemented for PostgreSQL
-- RBAC is used for fine-grained access control
-- Network security groups restrict traffic
-- Workload Identity provides secure access from pods to Azure services
-- Regular Kubernetes version updates should be applied
-- All communication happens over private networks where possible
+### Network Security
+- All PostgreSQL databases are accessible only via private endpoints
+- AKS uses Azure CNI with network policies enabled
+- NSGs are applied to all subnets with least-privilege rules
+- No public IP access for sensitive services by default
+
+### Identity and Access Management
+- Managed Identities are used instead of service principals where possible
+- Workload Identity Federation is used for Kubernetes pod authentication
+- RBAC is applied across all Azure resources with least-privilege principle
+- Key Vault uses RBAC for access control to secrets
+
+### Data Protection
+- Data Lake has hierarchical namespace with proper RBAC
+- Data is organized in containers with appropriate access control
+- Private endpoints are used for secure communication
+- Backup policies are enabled for critical services
+
+### Compliance Best Practices
+1. **Regularly Update**:
+   - Keep Kubernetes version up to date
+   - Apply security patches to all components
+   - Regularly rotate secrets and credentials
+
+2. **Monitor**:
+   - Enable diagnostic logs
+   - Set up alerts for suspicious activities
+   - Implement Azure Security Center recommendations
+
+3. **Audit**:
+   - Enable Azure Activity Logs
+   - Implement resource locks on production resources
+   - Regularly review access controls and permissions
 
 ## Contributing
 
 1. Fork the repository
 2. Create a feature branch
-3. Make your changes
-4. Submit a pull request with a detailed description of changes
+```bash
+git checkout -b feature/your-feature-name
+```
+3. Make your changes following the coding standards
+4. Run security and linting checks
+```bash
+# Check Terraform formatting
+terraform fmt -recursive
 
-## License
+# Validate Terraform configuration
+cd terraform/environments/dev/aks-base
+terragrunt validate
+```
+5. Submit a pull request with a detailed description of changes
+6. Ensure CI pipeline passes all checks
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Support
-
-For issues and feature requests, please create an issue in the repository.
+### Coding Standards
+- Use snake_case for resource names
+- Include descriptive comments for complex logic
+- Follow [Terraform best practices](https://cloud.hashicorp.com/products/terraform/tutorials/best-practices)
+- Use consistent indentation (2 spaces)
+- Include meaningful variable descriptions
+- Always specify explicit versions for providers
