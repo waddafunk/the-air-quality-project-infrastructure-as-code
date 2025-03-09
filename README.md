@@ -59,6 +59,7 @@ graph TB
     PG --> KV
     DBID -->|RBAC Access| DL
     DBID -->|Secrets Access| KV
+    DB -->|JDBC Connection| PG
     RAW & PROCESSED & CURATED ---|"Part of"| DL
     
     classDef azure fill:#0072C6,stroke:#fff,stroke-width:2px,color:#fff
@@ -109,6 +110,8 @@ flowchart LR
     AKS --> Storage["Data Lake Storage"]
     AIRFLOW -->|Private Endpoint| POSTGRES
     AIRFLOW -->|Managed Identity| Storage
+    DBPRIVATE -->|JDBC Connection| POSTGRES
+    DBPRIVATE -->|Managed Identity| Storage
     
     classDef network fill:#2C3E50,stroke:#fff,stroke-width:2px,color:#fff
     classDef security fill:#E74C3C,stroke:#fff,stroke-width:2px,color:#fff
@@ -775,4 +778,3 @@ terragrunt validate
 - Use consistent indentation (2 spaces)
 - Include meaningful variable descriptions
 - Always specify explicit versions for providers
-
