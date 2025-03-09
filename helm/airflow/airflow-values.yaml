@@ -239,6 +239,7 @@ airflow:
     - "psycopg2-binary"
     - "apache-airflow-providers-postgres"
     - "requests"
+    - "centralized-rate-limiter"
 
   ## pip packages that are protected from upgrade/downgrade by `extraPipPackages`
   ## - [WARNING] Pods will fail to start if `extraPipPackages` would cause these packages to change versions
@@ -1521,7 +1522,7 @@ dags:
     ## - only dags under this path within your repo will be seen by airflow,
     ##   (note, the full repo will still be cloned)
     ##
-    repoSubPath: ""
+    repoSubPath: "/dags"
 
     ## the git branch to check out
     ##
